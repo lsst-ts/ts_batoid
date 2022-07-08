@@ -29,7 +29,7 @@ import astropy.io.ascii
 
 import numpy as np
 
-from lsst.afw.cameraGeom import DetectorType
+from lsst.afw.cameraGeom import DetectorType, FIELD_ANGLE
 
 from lsst.daf import butler as dafButler
 
@@ -717,6 +717,37 @@ class CloseLoopTask(object):
         )
         return [
             detector.getName()
+            for detector in camera
+            if detector.getType() == detectorType
+        ]
+
+    def getSensorLocationListOfFields(self, instName):
+        """Get the list of sensor name of fields.
+
+        The list will be sorted based on the field index.
+
+        Parameters
+        ----------
+        instName : enum 'InstName' in lsst.ts.ofc.Utility
+            Instrument name.
+
+        Returns
+        -------
+        list[str]
+            List of sensor name.
+
+        Raises
+        ------
+        ValueError
+            This instrument name is not supported.
+        """
+
+        camera = getCamera(instName)
+        detectorType = (
+            DetectorType.WAVEFRONT if instName == "lsst" else DetectorType.SCIENCE
+        )
+        return [
+            (detector.getCenter(FIELD_ANGLE)[0]*180/np.pi, detector.getCenter(FIELD_ANGLE)[1]*180/np.pi)
             for detector in camera
             if detector.getType() == detectorType
         ]
