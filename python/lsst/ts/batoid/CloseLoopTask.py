@@ -37,13 +37,13 @@ from lsst.ts.wep.Utility import CamType, FilterType, runProgram
 
 from lsst.ts.ofc import OFC, OFCData
 
-from lsst.ts.phosim.telescope.TeleFacade import TeleFacade
-from lsst.ts.phosim.PhosimCmpt import PhosimCmpt
-from lsst.ts.phosim.SkySim import SkySim
-from lsst.ts.phosim.OpdMetrology import OpdMetrology
-from lsst.ts.phosim.utils.Utility import getPhoSimPath, getAoclcOutputPath, getCamera
-from lsst.ts.phosim.utils.SensorWavefrontError import SensorWavefrontError
-from lsst.ts.phosim.utils.PlotUtil import plotFwhmOfIters
+from lsst.ts.batoid.telescope.TeleFacade import TeleFacade
+from lsst.ts.batoid.PhosimCmpt import PhosimCmpt
+from lsst.ts.batoid.SkySim import SkySim
+from lsst.ts.batoid.OpdMetrology import OpdMetrology
+from lsst.ts.batoid.utils.Utility import getPhoSimPath, getAoclcOutputPath, getCamera
+from lsst.ts.batoid.utils.SensorWavefrontError import SensorWavefrontError
+from lsst.ts.batoid.utils.PlotUtil import plotFwhmOfIters
 
 
 class CloseLoopTask(object):
@@ -169,6 +169,8 @@ class CloseLoopTask(object):
 
     def configPhosimCmpt(
         self,
+        instName,
+        wavelength,
         filterType,
         rotAngInDeg,
         m1m3ForceError,
@@ -207,33 +209,10 @@ class CloseLoopTask(object):
         self.boresightRotAng = rotAngInDeg
 
         # Set the Telescope facade class
-        tele = TeleFacade()
-        tele.addSubSys(addCam=True, addM1M3=True, addM2=True)
-
-        phosimDir = getPhoSimPath()
-        tele.setPhoSimDir(phosimDir)
+        
 
         # Prepare the phosim component
-        self.phosimCmpt = PhosimCmpt(tele)
-
-        # Set the telescope survey parameters
-        self.phosimCmpt.setSurveyParam(
-            filterType=filterType,
-            boresight=tuple(boresight),
-            zAngleInDeg=zAngleInDeg,
-            rotAngInDeg=rotAngInDeg,
-        )
-
-        # Set the M1M3 force error
-        self.phosimCmpt.setM1M3ForceError(m1m3ForceError)
-
-        # Update the number of processor if necessary
-        if numPro > 1:
-            settingFile = self.phosimCmpt.getSettingFile()
-            settingFile.updateSetting("numPro", numPro)
-
-        # Set the seed number for M1M3 surface
-        self.phosimCmpt.setSeedNum(seedNum)
+        self.phosimCmpt = PhosimCmpt(instName, wavelength)
 
         return self.phosimCmpt
 
@@ -529,15 +508,18 @@ class CloseLoopTask(object):
         if camType == CamType.LsstCam:
             cornerSensorNameList = self.getSensorNameListOfFields(instName)
             cornerSensorIdList = self.getSensorIdListOfFields(instName)
+            cornerSensorLocationList = self.getSensorLocationListOfFields(instName)
             refSensorNameList = []
             refSensorIdList = []
-            for name, id in zip(cornerSensorNameList, cornerSensorIdList):
+            for name, id, location in zip(cornerSensorNameList, cornerSensorIdList, cornerSensorLocationList):
                 if name.endswith("SW0"):
                     refSensorNameList.append(name)
                     refSensorIdList.append(id)
+                    refSensorLocationList.append(location)
         else:
             refSensorNameList = self.getSensorNameListOfFields(instName)
             refSensorIdList = self.getSensorIdListOfFields(instName)
+            refSensorLocationList = self.getSensorLocationListOfFields(instName)
 
         # Common file and directory names
         opdZkFileName = "opd.zer"
@@ -558,7 +540,11 @@ class CloseLoopTask(object):
         for iterCount in range(iterNum):
 
             # Set the observation Id
-            self.phosimCmpt.setSurveyParam(obsId=obsId)
+            self.phosimCmpt.setSurveyParam(
+                obsId=obsId,
+                zenith_angle = 27.0912,
+                rotation_angle = 0.0
+            )
 
             # The iteration directory
             iterDirName = "%s%d" % (iterDefaultDirName, iterCount)
@@ -572,8 +558,6 @@ class CloseLoopTask(object):
             self.phosimCmpt.setOutputImgDir(outputImgDir)
 
             # Generate the OPD image
-            argString = self.phosimCmpt.getOpdArgsAndFilesForPhoSim(instName)
-            self.log.info(f"PHOSIM OPD ARGSTRING: {argString}")
 
             self.phosimCmpt.runPhoSim(argString)
 
@@ -621,19 +605,8 @@ class CloseLoopTask(object):
                     )
             else:
                 # Simulate to get the wavefront sensor data from WEP
-                listOfWfErr = self.phosimCmpt.mapOpdDataToListOfWfErr(
-                    opdZkFileName, refSensorIdList, refSensorNameList
-                )
-
-            # Record the wavefront error with the same order as OPD for the
-            # comparison
-            if self.useCcdImg():
-                self.phosimCmpt.reorderAndSaveWfErrFile(
-                    listOfWfErr,
-                    refSensorNameList,
-                    getCamera(instName),
-                    zkFileName=wfsZkFileName,
-                )
+                # listOfWfErr is already generated in runBatoid
+                listOfWfErr = listOfWfErr
 
             # Calculate the DOF
             wfe = np.array(
@@ -667,7 +640,8 @@ class CloseLoopTask(object):
 
             # Set the new aggregated DOF to phosimCmpt
             dofInUm = self.ofcCalc.ofc_controller.aggregated_state
-            self.phosimCmpt.setDofInUm(dofInUm)
+            builder = builder.with_aos_dof(dofInUm)
+            optic = builder.build()
 
             # Save the DOF file
             self.phosimCmpt.saveDofInUmFileForNextIter(
@@ -747,7 +721,7 @@ class CloseLoopTask(object):
             DetectorType.WAVEFRONT if instName == "lsst" else DetectorType.SCIENCE
         )
         return [
-            (detector.getCenter(FIELD_ANGLE)[0]*180/np.pi, detector.getCenter(FIELD_ANGLE)[1]*180/np.pi)
+            (detector.getCenter(FIELD_ANGLE)[0], detector.getCenter(FIELD_ANGLE)[1])
             for detector in camera
             if detector.getType() == detectorType
         ]

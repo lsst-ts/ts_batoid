@@ -32,8 +32,8 @@ from lsst.ts.wep.ParamReader import ParamReader
 
 from lsst.ts.ofc.utils import get_config_dir as getConfigDirOfc
 
-from lsst.ts.phosim.utils.MetroTool import calc_pssn, psf2eAtmW
-from lsst.ts.phosim.utils.Utility import getConfigDir, getCamera
+from lsst.ts.batoid.utils.MetroTool import calc_pssn, psf2eAtmW
+from lsst.ts.batoid.utils.Utility import getConfigDir, getCamera
 
 
 class OpdMetrology(object):

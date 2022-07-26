@@ -20,6 +20,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
+import batoid
 import re
 import shutil
 import warnings
@@ -30,13 +31,13 @@ from astropy.io import fits
 from lsst.ts.wep.Utility import runProgram
 from lsst.ts.wep.ParamReader import ParamReader
 
-from lsst.ts.phosim.OpdMetrology import OpdMetrology
-from lsst.ts.phosim.utils.Utility import getConfigDir, sortOpdFileList
-from lsst.ts.phosim.utils.SensorWavefrontError import SensorWavefrontError
+from lsst.ts.batoid.OpdMetrology import OpdMetrology
+from lsst.ts.batoid.utils.Utility import getConfigDir, sortOpdFileList
+from lsst.ts.batoid.utils.SensorWavefrontError import SensorWavefrontError
 
 
 class PhosimCmpt(object):
-    def __init__(self, tele):
+    def __init__(self, instName, wavelength):
         """Initialization of PhoSim component class.
 
         WEP: wavefront estimation pipeline.
@@ -53,13 +54,13 @@ class PhosimCmpt(object):
         # Telescope setting file
         settingFilePath = os.path.join(self.configDir, "phosimCmptSetting.yaml")
         self._phosimCmptSettingFile = ParamReader(filePath=settingFilePath)
-
-        # TeleFacade instance
-        self.tele = tele
+        
+        # Batoid optic instance
+        # self.optic = optic
 
         # OPD metrology
         self.metr = OpdMetrology()
-        self.metr.setCamera(self.tele.surveyParam["instName"])
+        self.metr.setCamera(instName)
 
         # Output directory of data
         self.outputDir = ""
@@ -72,6 +73,8 @@ class PhosimCmpt(object):
 
         # M1M3 force error
         self.m1m3ForceError = 0.05
+
+        self.refWavelength = wavelength
 
     def setM1M3ForceError(self, m1m3ForceError):
         """Set the M1M3 force error.
@@ -266,39 +269,6 @@ class PhosimCmpt(object):
 
         return self.seedNum
 
-    def setSurveyParam(
-        self,
-        obsId=None,
-        filterType=None,
-        boresight=None,
-        zAngleInDeg=None,
-        rotAngInDeg=None,
-    ):
-        """Set the survey parameters.
-
-        Parameters
-        ----------
-        obsId : int, optional
-            Observation Id. (the default is None.)
-        filterType : enum 'FilterType' in lsst.ts.wep.Utility, optional
-            Active filter type. (the default is None.)
-        boresight : tuple, optional
-            Telescope boresight in (ra, decl). (the default is None.)
-        zAngleInDeg : float, optional
-            Zenith angle in degree. (the default is None.)
-        rotAngInDeg : float, optional
-            Camera rotation angle in degree between -90 and 90 degrees. (the
-            default is None.)
-        """
-
-        self.tele.setSurveyParam(
-            obsId=obsId,
-            filterType=filterType,
-            boresight=boresight,
-            zAngleInDeg=zAngleInDeg,
-            rotAngInDeg=rotAngInDeg,
-        )
-
     def addOpdFieldXYbyDeg(self, fieldXInDegree, fieldYInDegree):
         """Add the OPD new field X, Y in degree.
 
@@ -382,7 +352,7 @@ class PhosimCmpt(object):
         header = "The followings are the DOF in um:"
         np.savetxt(filePath, np.transpose(dofInUm), header=header)
 
-    def runPhoSim(self, argString):
+    def runBatoid(self, obsId):
         """Run the PhoSim program.
 
         Parameters
@@ -391,117 +361,43 @@ class PhosimCmpt(object):
             Arguments for PhoSim.
         """
 
-        self.tele.runPhoSim(argString)
+        listOfWfErr = []
+        for sensorId, sensorLocation in zip(sensorIdList, sensorLocationList):
 
-    def getComCamOpdArgsAndFilesForPhoSim(
-        self,
-        cmdFileName="opd.cmd",
-        instFileName="opd.inst",
-        logFileName="opdPhoSim.log",
-        cmdSettingFileName="opdDefault.cmd",
-        instSettingFileName="opdDefault.inst",
-    ):
-        """Get the OPD calculation arguments and files of ComCam for the PhoSim
-        calculation.
+            zk = batoid.zernike(
+                self.optic,
+                sensorLocation[0], sensorLocation[1],
+                self.wavelength, 
+                eps=0.61, 
+                jmax = numOfZk + 3, 
+                nx=25
+            ) * 0.5
 
-        OPD: optical path difference.
-        ComCam: commissioning camera.
+            sensorWavefrontData = SensorWavefrontError(numOfZk=numOfZk)
+            sensorWavefrontData.setSensorId(sensorId)
+            #Batoid returns null zk[0] which is unused
+            sensorWavefrontData.setAnnularZernikePoly(zk[4:])
 
-        Parameters
-        ----------
-        cmdFileName : str, optional
-            Physical command file name. (the default is "opd.cmd".)
-        instFileName : str, optional
-            OPD instance file name. (the default is "opd.inst".)
-        logFileName : str, optional
-            Log file name. (the default is "opdPhoSim.log".)
-        cmdSettingFileName : str, optional
-            Physical command setting file name. (the default is
-            "opdDefault.cmd".)
-        instSettingFileName : str, optional
-            Instance setting file name. (the default is "opdDefault.inst".)
+            listOfWfErr.append(sensorWavefrontData)
 
-        Returns
-        -------
-        str
-            Arguments to run the PhoSim.
-        """
+            opd = batoid.wavefront(
+                self.optic,
+                sensorLocation[0], sensorLocation[1],
+                wavelength=self.wavelength, 
+                nx=255
+            ).array * self.wavelength * 1e6
+            
+            opddata = opd.data.astype(np.float32)
+            opddata[opd.mask] = 0.0
+            ofn = os.path.join(self.outputDir, f"opd_{obsId}_{sensorId}.fits.gz")
+            fits.writeto(
+                ofn,
+                opddata,
+                overwrite=True
+            )
 
-        warnings.warn(
-            "Use getOpdArgsAndFilesForPhoSim() instead.",
-            category=DeprecationWarning,
-            stacklevel=2,
-        )
+        return listOfWfErr
 
-        argString = self.getOpdArgsAndFilesForPhoSim(
-            "comcam",
-            cmdFileName=cmdFileName,
-            instFileName=instFileName,
-            logFileName=logFileName,
-            cmdSettingFileName=cmdSettingFileName,
-            instSettingFileName=instSettingFileName,
-        )
-
-        return argString
-
-    def getOpdArgsAndFilesForPhoSim(
-        self,
-        instName,
-        cmdFileName="opd.cmd",
-        instFileName="opd.inst",
-        logFileName="opdPhoSim.log",
-        cmdSettingFileName="opdDefault.cmd",
-        instSettingFileName="opdDefault.inst",
-    ):
-        """Get the OPD calculation arguments and files for the PhoSim
-        calculation.
-
-        OPD: optical path difference.
-
-        Parameters
-        ----------
-        instName : `str`
-            Instrument name.
-        cmdFileName : str, optional
-            Physical command file name. (the default is "opd.cmd".)
-        instFileName : str, optional
-            OPD instance file name. (the default is "opd.inst".)
-        logFileName : str, optional
-            Log file name. (the default is "opdPhoSim.log".)
-        cmdSettingFileName : str, optional
-            Physical command setting file name. (the default is
-            "opdDefault.cmd".)
-        instSettingFileName : str, optional
-            Instance setting file name. (the default is "opdDefault.inst".)
-
-        Returns
-        -------
-        str
-            Arguments to run the PhoSim.
-        """
-
-        # Set the weighting ratio and field positions of OPD
-        if instName == "lsst":
-            self.metr.setDefaultLsstWfsGQ()
-        else:
-            self.metr.setWgtAndFieldXyOfGQ(instName)
-
-        # Write the command file
-        cmdFilePath = self._writePertAndCmdFiles(cmdSettingFileName, cmdFileName)
-
-        # Write the instance file
-        instSettingFile = self._getInstSettingFilePath(instSettingFileName)
-        instFilePath = self.tele.writeOpdInstFile(
-            self.outputDir,
-            self.metr,
-            instSettingFile=instSettingFile,
-            instFileName=instFileName,
-        )
-
-        # Get the argument to run the PhoSim
-        argString = self._getPhoSimArgs(logFileName, instFilePath, cmdFilePath)
-
-        return argString
 
     def _writePertAndCmdFiles(self, cmdSettingFileName, cmdFileName):
         """Write the physical perturbation and command files.
@@ -1085,7 +981,7 @@ class PhosimCmpt(object):
 
         opdFileList = self._getOpdFileInDir(self.outputImgDir)
 
-        wavelengthInUm = self.tele.getRefWaveLength() * 1e-3
+        wavelengthInUm = self.refWavelength * 1e6
         pssnList = []
         for opdFile in opdFileList:
             pssn = self.metr.calcPSSN(wavelengthInUm, opdFitsFile=opdFile)

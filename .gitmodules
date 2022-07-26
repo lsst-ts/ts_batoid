@@ -1,3 +1,6 @@
 [submodule "wfsim"]
 	path = wfsim
 	url = https://github.com/jmeyers314/wfsim
+[submodule "python/lsst/ts/batoid/wfsim"]
+	path = python/lsst/ts/batoid/wfsim
+	url = https://github.com/jmeyers314/wfsim
