@@ -1,4 +1,4 @@
-# This file is part of ts_phosim.
+# This file is part of ts_batoid.
 #
 # Developed for the LSST Telescope and Site Systems.
 # This product includes software developed by the LSST Project
@@ -34,11 +34,12 @@ from lsst.ts.wep.ParamReader import ParamReader
 from lsst.ts.batoid.OpdMetrology import OpdMetrology
 from lsst.ts.batoid.utils.Utility import getConfigDir, sortOpdFileList
 from lsst.ts.batoid.utils.SensorWavefrontError import SensorWavefrontError
+from lsst.ts.batoid.wfsim.wfsim import SSTBuilder
 
 
-class PhosimCmpt(object):
-    def __init__(self, instName, wavelength):
-        """Initialization of PhoSim component class.
+class BatoidCmpt(object):
+    def __init__(self, instName):
+        """Initialization of Batoid component class.
 
         WEP: wavefront estimation pipeline.
 
@@ -52,11 +53,15 @@ class PhosimCmpt(object):
         self.configDir = getConfigDir()
 
         # Telescope setting file
-        settingFilePath = os.path.join(self.configDir, "phosimCmptSetting.yaml")
-        self._phosimCmptSettingFile = ParamReader(filePath=settingFilePath)
+        settingFilePath = os.path.join(self.configDir, "batoidCmptSetting.yaml")
+        self._batoidCmptSettingFile = ParamReader(filePath=settingFilePath)
+
+        settingFilePath = os.path.join(getConfigDir(), "teleSetting.yaml")
+        self._teleSettingFile = ParamReader(filePath=settingFilePath)
         
         # Batoid optic instance
-        # self.optic = optic
+        self.optic = None
+        self.builder = None
 
         # OPD metrology
         self.metr = OpdMetrology()
@@ -74,7 +79,7 @@ class PhosimCmpt(object):
         # M1M3 force error
         self.m1m3ForceError = 0.05
 
-        self.refWavelength = wavelength
+        self.refWavelength = self._teleSettingFile.getSetting("wavelengthInNm")
 
     def setM1M3ForceError(self, m1m3ForceError):
         """Set the M1M3 force error.
@@ -98,6 +103,79 @@ class PhosimCmpt(object):
 
         return self.m1m3ForceError
 
+    def getOptic(self):
+        """Get the optic object.
+
+        Returns
+        -------
+        Optic
+            Optic batoid object.
+        """
+
+        return self.optic
+
+    def setOptic(
+        self,
+        addCam=True, 
+        addM1M3=True, 
+        addM2=True
+    ):
+
+        builder = SSTBuilder(batoid.Optic.fromYaml("LSST_g_500.yaml"))
+
+        if addM1M3:
+            builder = (
+                builder
+                .with_m1m3_gravity(np.deg2rad(self.zAngleInDeg))
+                .with_m1m3_temperature(
+                    m1m3_TBulk=self._teleSettingFile.getSetting("m1m3TBulk"),
+                    m1m3_TxGrad=self._teleSettingFile.getSetting("m1m3TxGrad"),
+                    m1m3_TyGrad=self._teleSettingFile.getSetting("m1m3TyGrad"),
+                    m1m3_TzGrad=self._teleSettingFile.getSetting("m1m3TzGrad"),
+                    m1m3_TrGrad=self._teleSettingFile.getSetting("m1m3TrGrad")
+                )
+                .with_m1m3_lut(
+                    np.deg2rad(self.zAngleInDeg), 
+                    error=self.m1m3ForceError, 
+                    seed=self.seedNum
+                )
+            )
+        if addM2:
+            builder = (
+                builder
+                .with_m2_gravity(np.deg2rad(self.zAngleInDeg))
+                .with_m2_temperature(
+                    m2_TrGrad=self._teleSettingFile.getSetting("m2TrGrad"),
+                    m2_TzGrad=self._teleSettingFile.getSetting("m2TzGrad")
+                )
+            )
+        if addCam:
+            builder = (
+                builder
+                .with_camera_gravity(
+                    zenith_angle=np.deg2rad(self.zAngleInDeg),
+                    rotation_angle=np.deg2rad(self.rotAngInDeg)
+                )
+                .with_camera_temperature(
+                    camera_TBulk=self._teleSettingFile.getSetting("camTB")
+                )
+            )
+        
+        self.builder = builder
+        self.optic =  builder.build()
+
+    def getTeleSettingFile(self):
+        """Get the setting file.
+
+        Returns
+        -------
+        lsst.ts.wep.ParamReader
+            Setting file.
+        """
+
+        return self._teleSettingFile
+
+
     def getSettingFile(self):
         """Get the setting file.
 
@@ -107,18 +185,7 @@ class PhosimCmpt(object):
             Setting file.
         """
 
-        return self._phosimCmptSettingFile
-
-    def getTele(self):
-        """Get the telescope object.
-
-        Returns
-        -------
-        TeleFacade
-            Telescope object.
-        """
-
-        return self.tele
+        return self._batoidCmptSettingFile
 
     def getNumOfZk(self):
         """Get the number of Zk (annular Zernike polynomial).
@@ -129,7 +196,7 @@ class PhosimCmpt(object):
             Number of Zk.
         """
 
-        return int(self._phosimCmptSettingFile.getSetting("numOfZk"))
+        return int(self._batoidCmptSettingFile.getSetting("numOfZk"))
 
     def getIntraFocalDirName(self):
         """Get the intra-focal directory name.
@@ -140,7 +207,7 @@ class PhosimCmpt(object):
             Intra-focal directory name.
         """
 
-        return self._phosimCmptSettingFile.getSetting("intraDirName")
+        return self._batoidCmptSettingFile.getSetting("intraDirName")
 
     def getExtraFocalDirName(self):
         """Get the extra-focal directory name.
@@ -151,7 +218,7 @@ class PhosimCmpt(object):
             Extra-focal directory name.
         """
 
-        return self._phosimCmptSettingFile.getSetting("extraDirName")
+        return self._batoidCmptSettingFile.getSetting("extraDirName")
 
     def getWfsDirName(self):
         """Get the WFS directory name.
@@ -162,7 +229,7 @@ class PhosimCmpt(object):
             WFS directory name.
         """
 
-        return self._phosimCmptSettingFile.getSetting("wfsDirName")
+        return self._batoidCmptSettingFile.getSetting("wfsDirName")
 
     def getOpdMetr(self):
         """Get the OPD metrology object.
@@ -269,6 +336,38 @@ class PhosimCmpt(object):
 
         return self.seedNum
 
+    def setSurveyParam(
+        self,
+        obsId=None,
+        filterType=None,
+        boresight=None,
+        zAngleInDeg=None,
+        rotAngInDeg=None,
+    ):
+        """Set the survey parameters.
+
+        Parameters
+        ----------
+        obsId : int, optional
+            Observation Id. (the default is None.)
+        filterType : enum 'FilterType' in lsst.ts.wep.Utility, optional
+            Active filter type. (the default is None.)
+        boresight : tuple, optional
+            Telescope boresight in (ra, decl). (the default is None.)
+        zAngleInDeg : float, optional
+            Zenith angle in degree. (the default is None.)
+        rotAngInDeg : float, optional
+            Camera rotation angle in degree between -90 and 90 degrees. (the
+            default is None.)
+        """
+
+        self.filterType = filterType
+        self.obsId = obsId
+        self.boresight = boresight
+        self.zAngleInDeg = zAngleInDeg
+        self.rotAngInDeg = rotAngInDeg
+
+
     def addOpdFieldXYbyDeg(self, fieldXInDegree, fieldYInDegree):
         """Add the OPD new field X, Y in degree.
 
@@ -298,7 +397,8 @@ class PhosimCmpt(object):
             DOF in um.
         """
 
-        self.tele.accDofInUm(dofInUm)
+        self.builder = self.builder.with_aos_dof(dofInUm + self.builder.dof)
+        self.optic = self.builder.build()
 
     def setDofInUm(self, dofInUm):
         """Set the accumulated degree of freedom (DOF) in um.
@@ -314,7 +414,8 @@ class PhosimCmpt(object):
             DOF in um.
         """
 
-        self.tele.setDofInUm(dofInUm)
+        self.builder = self.builder.with_aos_dof(dofInUm)
+        self.optic = self.builder.build()
 
     def getDofInUm(self):
         """Get the accumulated degree of freedom (DOF) in um.
@@ -330,7 +431,7 @@ class PhosimCmpt(object):
             DOF in um.
         """
 
-        return self.tele.getDofInUm()
+        return self.builder.dof
 
     def saveDofInUmFileForNextIter(
         self, dofInUm, dofInUmFileName="dofPertInNextIter.mat"
@@ -352,26 +453,30 @@ class PhosimCmpt(object):
         header = "The followings are the DOF in um:"
         np.savetxt(filePath, np.transpose(dofInUm), header=header)
 
-    def runBatoid(self, obsId):
-        """Run the PhoSim program.
+    def runBatoid(
+        self, obsId, sensorIdList, sensorLocationList
+    ):
+        """Run the Batoid program.
 
         Parameters
         ----------
         argString : str
-            Arguments for PhoSim.
+            Arguments for Batoid.
         """
 
         listOfWfErr = []
+        numOfZk = self.getNumOfZk()
+
         for sensorId, sensorLocation in zip(sensorIdList, sensorLocationList):
 
             zk = batoid.zernike(
                 self.optic,
                 sensorLocation[0], sensorLocation[1],
-                self.wavelength, 
+                self.refWavelength, 
                 eps=0.61, 
                 jmax = numOfZk + 3, 
                 nx=25
-            ) * 0.5
+            ) * self.refWavelength * 1e6
 
             sensorWavefrontData = SensorWavefrontError(numOfZk=numOfZk)
             sensorWavefrontData.setSensorId(sensorId)
@@ -383,9 +488,9 @@ class PhosimCmpt(object):
             opd = batoid.wavefront(
                 self.optic,
                 sensorLocation[0], sensorLocation[1],
-                wavelength=self.wavelength, 
+                wavelength=self.refWavelength, 
                 nx=255
-            ).array * self.wavelength * 1e6
+            ).array * self.refWavelength * 1e6
             
             opddata = opd.data.astype(np.float32)
             opddata[opd.mask] = 0.0
@@ -457,296 +562,6 @@ class PhosimCmpt(object):
         instSettingFile = os.path.join(self.configDir, "instFile", instSettingFileName)
 
         return instSettingFile
-
-    def _getPhoSimArgs(self, logFileName, instFilePath, cmdFilePath):
-        """Get the arguments needed to run the PhoSim.
-
-        Parameters
-        ----------
-        logFileName : str
-            Log file name.
-        instFilePath: str
-            Instance file path.
-        cmdFilePath : str
-            Physical command file path.
-
-        Returns
-        -------
-        str
-            Arguments to run the PhoSim.
-        """
-
-        # PhoSim parameters
-        numPro = int(self._phosimCmptSettingFile.getSetting("numPro"))
-        e2ADC = int(self._phosimCmptSettingFile.getSetting("e2ADC"))
-        logFilePath = os.path.join(self.outputImgDir, logFileName)
-
-        argString = self.tele.getPhoSimArgs(
-            instFilePath,
-            extraCommandFile=cmdFilePath,
-            numPro=numPro,
-            outputDir=self.outputImgDir,
-            e2ADC=e2ADC,
-            logFilePath=logFilePath,
-        )
-
-        return argString
-
-    def getComCamStarArgsAndFilesForPhoSim(
-        self,
-        extraObsId,
-        intraObsId,
-        skySim,
-        simSeed=1000,
-        cmdSettingFileName="starDefault.cmd",
-        instSettingFileName="starSingleExp.inst",
-    ):
-        """Get the star calculation arguments and files of ComCam for the
-        PhoSim calculation.
-
-        Parameters
-        ----------
-        extraObsId : int
-            Extra-focal observation Id.
-        intraObsId : int
-            Intra-focal observation Id.
-        skySim : SkySim
-            Sky simulator
-        simSeed : int, optional
-            Random number seed. (the default is 1000.)
-        cmdSettingFileName : str, optional
-            Physical command setting file name. (the default is
-            "starDefault.cmd".)
-        instSettingFileName : str, optional
-            Instance setting file name. (the default is "starSingleExp.inst".)
-
-        Returns
-        -------
-        list[str]
-            List of arguments to run the PhoSim.
-        """
-
-        warnings.warn(
-            "Use getPistonCamStarArgsAndFilesForPhoSim() instead.",
-            category=DeprecationWarning,
-            stacklevel=2,
-        )
-
-        return self.getPistonCamStarArgsAndFilesForPhoSim(
-            extraObsId,
-            intraObsId,
-            skySim,
-            simSeed=simSeed,
-            cmdSettingFileName=cmdSettingFileName,
-            instSettingFileName=instSettingFileName,
-        )
-
-    def getPistonCamStarArgsAndFilesForPhoSim(
-        self,
-        extraObsId,
-        intraObsId,
-        skySim,
-        simSeed=1000,
-        cmdSettingFileName="starDefault.cmd",
-        instSettingFileName="starSingleExp.inst",
-    ):
-        """Get the star calculation arguments and files of piston camera (
-        ComCam or LSST FAM) for the PhoSim calculation.
-
-        FAM: Full-array mode.
-
-        Parameters
-        ----------
-        extraObsId : int
-            Extra-focal observation Id.
-        intraObsId : int
-            Intra-focal observation Id.
-        skySim : SkySim
-            Sky simulator
-        simSeed : int, optional
-            Random number seed. (the default is 1000.)
-        cmdSettingFileName : str, optional
-            Physical command setting file name. (the default is
-            "starDefault.cmd".)
-        instSettingFileName : str, optional
-            Instance setting file name. (the default is "starSingleExp.inst".)
-
-        Returns
-        -------
-        list[str]
-            List of arguments to run the PhoSim.
-        """
-
-        # Set the intra- and extra-focal related information
-        obsIdList = {"-1": extraObsId, "1": intraObsId}
-        instFileNameList = {"-1": "starExtra.inst", "1": "starIntra.inst"}
-        logFileNameList = {"-1": "starExtraPhoSim.log", "1": "starIntraPhoSim.log"}
-
-        extraFocalDirName = self.getExtraFocalDirName()
-        intraFocalDirName = self.getIntraFocalDirName()
-        outImgDirNameList = {"-1": extraFocalDirName, "1": intraFocalDirName}
-
-        # Write the instance and command files of defocal conditions
-        cmdFileName = "star.cmd"
-        onFocalDofInUm = self.getDofInUm()
-        onFocalOutputImgDir = self.outputImgDir
-        argStringList = []
-        for ii in (-1, 1):
-
-            # Set the observation ID
-            self.setSurveyParam(obsId=obsIdList[str(ii)])
-
-            # Camera piston (Change the unit from mm to um)
-            pistonInUm = np.zeros(len(onFocalDofInUm))
-            pistonInUm[5] = ii * self.tele.getDefocalDistInMm() * 1e3
-
-            # Set the new DOF that considers the piston motion
-            self.setDofInUm(onFocalDofInUm + pistonInUm)
-
-            # Update the output image directory
-            outputImgDir = os.path.join(onFocalOutputImgDir, outImgDirNameList[str(ii)])
-            self.setOutputImgDir(outputImgDir)
-
-            # Get the argument to run the phosim
-            argString = self.getStarArgsAndFilesForPhoSim(
-                skySim,
-                cmdFileName=cmdFileName,
-                instFileName=instFileNameList[str(ii)],
-                logFileName=logFileNameList[str(ii)],
-                simSeed=simSeed,
-                cmdSettingFileName=cmdSettingFileName,
-                instSettingFileName=instSettingFileName,
-            )
-            argStringList.append(argString)
-
-        # Put the internal state back to the focal plane condition
-        self.setDofInUm(onFocalDofInUm)
-        self.setOutputImgDir(onFocalOutputImgDir)
-
-        return argStringList
-
-    def getWfsStarArgsAndFilesForPhoSim(
-        self,
-        obsId,
-        skySim,
-        simSeed=1000,
-        cmdSettingFileName="starDefault.cmd",
-        instSettingFileName="starSingleExp.inst",
-    ):
-        """Get the star calculation arguments and files for the
-        wavefront sensors for the PhoSim calculation.
-
-        Parameters
-        ----------
-        obsId : int
-            Observation Id.
-        skySim : SkySim
-            Sky simulator
-        simSeed : int, optional
-            Random number seed. (the default is 1000.)
-        cmdSettingFileName : str, optional
-            Physical command setting file name. (the default is
-            "starDefault.cmd".)
-        instSettingFileName : str, optional
-            Instance setting file name. (the default is "starSingleExp.inst".)
-
-        Returns
-        -------
-        str
-            Arguments to run the PhoSim.
-        """
-
-        instFileName = "starWfs.inst"
-        logFileName = "starWfsPhosim.log"
-
-        wfsDirName = self.getWfsDirName()
-
-        # Write the command files of conditions
-        cmdFileName = "star.cmd"
-        inFocusDofInUm = self.getDofInUm()
-        inFocusOutputImgDir = self.outputImgDir
-
-        # Set the observation ID
-        self.setSurveyParam(obsId=obsId)
-
-        # Set the DOF
-        self.setDofInUm(inFocusDofInUm)
-
-        # Update the output image directory
-        outputImgDir = os.path.join(inFocusOutputImgDir, wfsDirName)
-        self.setOutputImgDir(outputImgDir)
-
-        # Get the argument to run the phosim
-        argString = self.getStarArgsAndFilesForPhoSim(
-            skySim,
-            cmdFileName=cmdFileName,
-            instFileName=instFileName,
-            logFileName=logFileName,
-            simSeed=simSeed,
-            cmdSettingFileName=cmdSettingFileName,
-            instSettingFileName=instSettingFileName,
-        )
-
-        # Return to original state
-        self.setOutputImgDir(inFocusOutputImgDir)
-
-        return argString
-
-    def getStarArgsAndFilesForPhoSim(
-        self,
-        skySim,
-        cmdFileName="star.cmd",
-        instFileName="star.inst",
-        logFileName="starPhoSim.log",
-        simSeed=1000,
-        cmdSettingFileName="starDefault.cmd",
-        instSettingFileName="starSingleExp.inst",
-    ):
-        """Get the star calculation arguments and files for the PhoSim
-        calculation.
-
-        Parameters
-        ----------
-        skySim : SkySim
-            Sky simulator
-        cmdFileName : str, optional
-            Physical command file name. (the default is "star.cmd".)
-        instFileName : str, optional
-            Star instance file name. (the default is "star.inst".)
-        logFileName : str, optional
-            Log file name. (the default is "starPhoSim.log".)
-        simSeed : int, optional
-            Random number seed. (the default is 1000)
-        cmdSettingFileName : str, optional
-            Physical command setting file name. (the default is
-            "starDefault.cmd".)
-        instSettingFileName : str, optional
-            Instance setting file name. (the default is "starSingleExp.inst".)
-
-        Returns
-        -------
-        str
-            Arguments to run the PhoSim.
-        """
-
-        # Write the command file
-        cmdFilePath = self._writePertAndCmdFiles(cmdSettingFileName, cmdFileName)
-
-        # Write the instance file
-        instSettingFile = self._getInstSettingFilePath(instSettingFileName)
-        instFilePath = self.tele.writeStarInstFile(
-            self.outputDir,
-            skySim,
-            simSeed=simSeed,
-            sedName="sed_flat.txt",
-            instSettingFile=instSettingFile,
-            instFileName=instFileName,
-        )
-
-        # Get the argument to run the PhoSim
-        argString = self._getPhoSimArgs(logFileName, instFilePath, cmdFilePath)
-
-        return argString
 
     def analyzeComCamOpdData(
         self, zkFileName="opd.zer", rotOpdInDeg=0.0, pssnFileName="PSSN.txt"
@@ -1178,221 +993,3 @@ class PhosimCmpt(object):
 
         return fwhmCollection, sensor_id
 
-    def repackageWfsCamImgs(self, instName, isEimg=False):
-        """Repackage the images from in focus camera for processing.
-
-        Parameters
-        ----------
-        instName : str
-            Instrument name.
-        isEimg : bool, optional
-            Is eimage or not. (the default is False.)
-        """
-
-        # Make a temporary directory
-        tmpDirPath = os.path.join(self.outputImgDir, "tmp")
-        self._makeDir(tmpDirPath)
-
-        wfsDirName = self.getWfsDirName()
-
-        # Repackage the images to the temporary directory
-        command = "phosim_repackager.py"
-        phosimImgDir = os.path.join(self.outputImgDir, wfsDirName)
-        argstring = "%s --out_dir=%s" % (phosimImgDir, tmpDirPath)
-        argstring += f" --inst {instName} "
-        if isEimg:
-            argstring += " --eimage"
-        # Wavefront sensors require camera to be in focus (focusz = 0)
-        argstring += " --focusz 0"
-
-        runProgram(command, argstring=argstring)
-
-        # Remove the image data in the original directory
-        argstring = "-rf %s/*.fits*" % phosimImgDir
-        runProgram("rm", argstring=argstring)
-
-        # Put the repackaged data into the image directory
-        argstring = "%s/*.fits %s" % (tmpDirPath, phosimImgDir)
-        runProgram("mv", argstring=argstring)
-
-        # Remove the temporary directory
-        shutil.rmtree(tmpDirPath)
-
-    def repackagePistonCamImgs(self, instName, isEimg=False):
-        """Repackage the images of piston camera (ComCam and LSST FAM) from
-        PhoSim for processing.
-
-        FAM: Full-array mode.
-
-        Parameters
-        ----------
-        instName : `str`
-            Instrument name.
-        isEimg : bool, optional
-            Is eimage or not. (the default is False.)
-        """
-
-        # Make a temporary directory
-        tmpDirPath = os.path.join(self.outputImgDir, "tmp")
-        self._makeDir(tmpDirPath)
-
-        intraFocalDirName = self.getIntraFocalDirName()
-        extraFocalDirName = self.getExtraFocalDirName()
-        for imgType in (intraFocalDirName, extraFocalDirName):
-
-            # Repackage the images to the temporary directory
-            command = "phosim_repackager.py"
-            phosimImgDir = os.path.join(self.outputImgDir, imgType)
-            argstring = "%s --out_dir=%s" % (phosimImgDir, tmpDirPath)
-            argstring += f" --inst {instName} "
-            if isEimg:
-                argstring += " --eimage"
-            focusz = (
-                self.tele.getDefocalDistInMm()
-                * 1e3
-                * (-1.0 if imgType == intraFocalDirName else 1.0)
-            )
-            argstring += f" --focusz {focusz}"
-
-            runProgram(command, argstring=argstring)
-
-            # Remove the image data in the original directory
-            argstring = "-rf %s/*.fits*" % phosimImgDir
-            runProgram("rm", argstring=argstring)
-
-            # Put the repackaged data into the image directory
-            argstring = "%s/*.fits %s" % (tmpDirPath, phosimImgDir)
-            runProgram("mv", argstring=argstring)
-
-        # Remove the temporary directory
-        shutil.rmtree(tmpDirPath)
-
-    def repackageComCamAmpImgFromPhoSim(self):
-        """Repackage the ComCam amplifier images from PhoSim to the single 16
-        extension MEFs for processing.
-
-        ComCam: commissioning camera.
-        MEF: multi-extension frames.
-        """
-
-        warnings.warn(
-            "Use repackagePistonCamImgs() instead.",
-            category=DeprecationWarning,
-            stacklevel=2,
-        )
-
-        self.repackagePistonCamImgs(isEimg=False, instName="comcam")
-
-    def repackageComCamEimgFromPhoSim(self):
-        """Repackage the ComCam eimages from PhoSim for processing.
-
-        ComCam: commissioning camera.
-        """
-
-        warnings.warn(
-            "Use repackagePistonCamImgs() instead.",
-            category=DeprecationWarning,
-            stacklevel=2,
-        )
-
-        self.repackagePistonCamImgs(isEimg=True, instName="comcam")
-
-    def reorderAndSaveWfErrFile(
-        self, listOfWfErr, refSensorNameList, lsstCamera, zkFileName="wfs.zer"
-    ):
-        """Reorder the wavefront error in the wavefront error list according to
-        the reference sensor name list and save to a file.
-
-        The unexisted wavefront error will be a numpy zero array. The unit is
-        um.
-
-        Parameters
-        ----------
-        listOfWfErr : list [lsst.ts.wep.ctrlIntf.SensorWavefrontData]
-            List of SensorWavefrontData object.
-        refSensorNameList : list
-            Reference sensor name list.
-        lsstCamera : lsst.afw.cameraGeom.Camera
-            Lsst instrument.
-        zkFileName : str, optional
-            Wavefront error file name. (the default is "wfs.zer".)
-        """
-
-        # Get the sensor name that in the wavefront error map
-        wfErrMap = self._transListOfWfErrToMap(listOfWfErr, lsstCamera)
-        nameListInWfErrMap = list(wfErrMap.keys())
-
-        # Reorder the wavefront error map based on the reference sensor name
-        # list.
-        reorderedWfErrMap = dict()
-        for sensorName in refSensorNameList:
-            if sensorName in nameListInWfErrMap:
-                wfErr = wfErrMap[sensorName]
-            else:
-                numOfZk = self.getNumOfZk()
-                wfErr = np.zeros(numOfZk)
-            reorderedWfErrMap[sensorName] = wfErr
-
-        # Save the file
-        filePath = os.path.join(self.outputImgDir, zkFileName)
-        wfsData = self._getWfErrValuesAndStackToMatrix(reorderedWfErrMap)
-        header = "The followings are ZK in um from z4 to z22:"
-        np.savetxt(filePath, wfsData, header=header)
-
-    def _transListOfWfErrToMap(self, listOfWfErr, lsstCamera):
-        """Transform the list of wavefront error to map.
-
-        Parameters
-        ----------
-        listOfWfErr : list [lsst.ts.wep.ctrlIntf.SensorWavefrontData]
-            List of SensorWavefrontData object.
-        lsstCamera : lsst.afw.cameraGeom.Camera
-            Lsst instrument.
-
-        Returns
-        -------
-        dict
-            Calculated wavefront error. The dictionary key [str] is the
-            abbreviated sensor name (e.g. R22_S11). The dictionary item
-            [numpy.ndarray] is the averaged wavefront error (z4-z22) in um.
-        """
-
-        mapSensorNameAndId = dict(
-            [(detector.getId(), detector.getName()) for detector in lsstCamera]
-        )
-
-        wfErrMap = dict()
-        for sensorWavefrontData in listOfWfErr:
-            sensorId = sensorWavefrontData.getSensorId()
-            sensorName = mapSensorNameAndId[sensorId]
-
-            avgErrInUm = sensorWavefrontData.getAnnularZernikePoly()
-
-            wfErrMap[sensorName] = avgErrInUm
-
-        return wfErrMap
-
-    def _getWfErrValuesAndStackToMatrix(self, wfErrMap):
-        """Get the wavefront errors and stack them to be a matrix.
-
-        Parameters
-        ----------
-        wfErrMap : dict
-            Calculated wavefront error. The dictionary key [str] is the
-            abbreviated sensor name (e.g. R22_S11). The dictionary item
-            [numpy.ndarray] is the averaged wavefront error (z4-z22) in um.
-
-        Returns
-        -------
-        numpy.ndarray
-            Wavefront errors as a matrix. The column is z4-z22 in um. The row
-            is the individual sensor. The order is the same as the input of
-            wfErrMap.
-        """
-
-        numOfZk = self.getNumOfZk()
-        valueMatrix = np.empty((0, numOfZk))
-        for wfErr in wfErrMap.values():
-            valueMatrix = np.vstack((valueMatrix, wfErr))
-
-        return valueMatrix

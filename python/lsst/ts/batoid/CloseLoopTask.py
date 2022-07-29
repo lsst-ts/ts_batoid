@@ -38,7 +38,7 @@ from lsst.ts.wep.Utility import CamType, FilterType, runProgram
 from lsst.ts.ofc import OFC, OFCData
 
 from lsst.ts.batoid.telescope.TeleFacade import TeleFacade
-from lsst.ts.batoid.PhosimCmpt import PhosimCmpt
+from lsst.ts.batoid.BatoidCmpt import BatoidCmpt
 from lsst.ts.batoid.SkySim import SkySim
 from lsst.ts.batoid.OpdMetrology import OpdMetrology
 from lsst.ts.batoid.utils.Utility import getPhoSimPath, getAoclcOutputPath, getCamera
@@ -60,7 +60,7 @@ class CloseLoopTask(object):
         self.ofcCalc = None
 
         # PhoSim component
-        self.phosimCmpt = None
+        self.batoidCmpt = None
 
         # Use the amplifier image
         self.useAmp = False
@@ -167,10 +167,9 @@ class CloseLoopTask(object):
 
         self.ofcCalc = OFC(OFCData(instName))
 
-    def configPhosimCmpt(
+    def configBatoidCmpt(
         self,
         instName,
-        wavelength,
         filterType,
         rotAngInDeg,
         m1m3ForceError,
@@ -200,7 +199,7 @@ class CloseLoopTask(object):
 
         Returns
         -------
-        PhosimCmpt
+        BatoidCmpt
             PhoSim component.
         """
 
@@ -208,13 +207,33 @@ class CloseLoopTask(object):
         self.boresightDec = boresight[1]
         self.boresightRotAng = rotAngInDeg
 
-        # Set the Telescope facade class
-        
+        # Set the telescope survey parameters
+        self.batoidCmpt = BatoidCmpt(instName)
+        self.batoidCmpt.setSurveyParam(
+            filterType=filterType,
+            boresight=tuple(boresight),
+            zAngleInDeg=zAngleInDeg,
+            rotAngInDeg=rotAngInDeg,
+        )
 
-        # Prepare the phosim component
-        self.phosimCmpt = PhosimCmpt(instName, wavelength)
+        # Set the M1M3 force error
+        self.batoidCmpt.setM1M3ForceError(m1m3ForceError)
 
-        return self.phosimCmpt
+        # Update the number of processor if necessary
+        if numPro > 1:
+            settingFile = self.batoidCmpt.getSettingFile()
+            settingFile.updateSetting("numPro", numPro)
+
+        # Set the seed number for M1M3 surface
+        self.batoidCmpt.setSeedNum(seedNum)
+
+        self.batoidCmpt.setOptic(
+            addCam=True, 
+            addM1M3=True,
+            addM2=True
+        )
+
+        return self.batoidCmpt
 
     def getSkySim(self):
         """Get the sky simulator.
@@ -241,16 +260,16 @@ class CloseLoopTask(object):
 
         return self.ofcCalc
 
-    def getPhosimCmpt(self):
+    def getBatoidCmpt(self):
         """Get the PhoSim component.
 
         Returns
         -------
-        PhosimCmpt or None
+        BatoidCmpt or None
             PhoSim component. None if not configured yet.
         """
 
-        return self.phosimCmpt
+        return self.batoidCmpt
 
     def assignImgType(self, useEimg):
         """Assign the image type.
@@ -338,7 +357,7 @@ class CloseLoopTask(object):
 
         # Configure the components
         self.configOfcCalc(instName)
-        self.configPhosimCmpt(filterType, rotCamInDeg, m1m3ForceError, numPro)
+        self.configBatoidCmpt(filterType, rotCamInDeg, m1m3ForceError, numPro)
 
         butlerRootPath = os.path.join(baseOutputDir, "phosimData")
         # Run the simulation
@@ -499,7 +518,7 @@ class CloseLoopTask(object):
 
         # Set the telescope state to be the same as the OFC
         state0 = self.ofcCalc.ofc_controller.aggregated_state
-        self.phosimCmpt.setDofInUm(state0)
+        self.atoidCmpt.setDofInUm(state0)
 
         # Get the list of referenced sensor name (field positions)
 
@@ -540,7 +559,7 @@ class CloseLoopTask(object):
         for iterCount in range(iterNum):
 
             # Set the observation Id
-            self.phosimCmpt.setSurveyParam(
+            self.batoidCmpt.setSurveyParam(
                 obsId=obsId,
                 zenith_angle = 27.0912,
                 rotation_angle = 0.0
@@ -551,19 +570,19 @@ class CloseLoopTask(object):
 
             # Set the output directory
             outputDir = os.path.join(baseOutputDir, iterDirName, outputDirName)
-            self.phosimCmpt.setOutputDir(outputDir)
+            self.batoidCmpt.setOutputDir(outputDir)
 
             # Set the output image directory
             outputImgDir = os.path.join(baseOutputDir, iterDirName, outputImgDirName)
-            self.phosimCmpt.setOutputImgDir(outputImgDir)
+            self.batoidCmpt.setOutputImgDir(outputImgDir)
 
             # Generate the OPD image
 
-            self.phosimCmpt.runPhoSim(argString)
+            self.batoidCmpt.runPhoSim(argString)
 
             # Analyze the OPD data
             # Rotate OPD in the reversed direction of camera
-            self.phosimCmpt.analyzeOpdData(
+            self.batoidCmpt.analyzeOpdData(
                 instName,
                 zkFileName=opdZkFileName,
                 rotOpdInDeg=-rotCamInDeg,
@@ -571,15 +590,15 @@ class CloseLoopTask(object):
             )
 
             # Get the PSSN from file
-            pssn = self.phosimCmpt.getOpdPssnFromFile(opdPssnFileName)
+            pssn = self.batoidCmpt.getOpdPssnFromFile(opdPssnFileName)
             self.log.info("Calculated PSSN is %s." % pssn)
 
             # Get the GQ effective FWHM from file
-            gqEffFwhm = self.phosimCmpt.getOpdGqEffFwhmFromFile(opdPssnFileName)
+            gqEffFwhm = self.batoidCmpt.getOpdGqEffFwhmFromFile(opdPssnFileName)
             self.log.info("GQ effective FWHM is %.4f." % gqEffFwhm)
 
             # Set the FWHM data
-            fwhm, sensor_id = self.phosimCmpt.getListOfFwhmSensorData(
+            fwhm, sensor_id = self.batoidCmpt.getListOfFwhmSensorData(
                 opdPssnFileName, refSensorIdList
             )
 
@@ -638,13 +657,13 @@ class CloseLoopTask(object):
                 rot=rotCamInDeg,
             )
 
-            # Set the new aggregated DOF to phosimCmpt
+            # Set the new aggregated DOF to BatoidCmpt
             dofInUm = self.ofcCalc.ofc_controller.aggregated_state
             builder = builder.with_aos_dof(dofInUm)
             optic = builder.build()
 
             # Save the DOF file
-            self.phosimCmpt.saveDofInUmFileForNextIter(
+            self.batoidCmpt.saveDofInUmFileForNextIter(
                 dofInUm, dofInUmFileName=dofInUmFileName
             )
 
@@ -796,7 +815,7 @@ class CloseLoopTask(object):
         """
 
         # Generate the images
-        argString = self.phosimCmpt.getWfsStarArgsAndFilesForPhoSim(
+        argString = self.batoidCmpt.getWfsStarArgsAndFilesForPhoSim(
             obsId,
             self.skySim,
             simSeed=simSeed,
@@ -805,10 +824,10 @@ class CloseLoopTask(object):
         )
 
         self.log.info(f"PHOSIM CCD ARGSTRING: {argString}")
-        self.phosimCmpt.runPhoSim(argString)
+        self.batoidCmpt.runPhoSim(argString)
 
         # Repackage the images based on the image type
-        self.phosimCmpt.repackageWfsCamImgs(
+        self.batoidCmpt.repackageWfsCamImgs(
             instName=instName if instName == "comcam" else "lsst", isEimg=self.useEimg
         )
 
@@ -863,7 +882,7 @@ class CloseLoopTask(object):
         intraObsId = obsId + 2
 
         # Generate the defocal images
-        argStringList = self.phosimCmpt.getPistonCamStarArgsAndFilesForPhoSim(
+        argStringList = self.batoidCmpt.getPistonCamStarArgsAndFilesForPhoSim(
             extraObsId,
             intraObsId,
             self.skySim,
@@ -873,10 +892,10 @@ class CloseLoopTask(object):
         )
         for argString in argStringList:
             self.log.info(f"PHOSIM CCD ARGSTRING: {argString}")
-            self.phosimCmpt.runPhoSim(argString)
+            self.batoidCmpt.runPhoSim(argString)
 
         # Repackage the images based on the image type
-        self.phosimCmpt.repackagePistonCamImgs(
+        self.batoidCmpt.repackagePistonCamImgs(
             instName=instName if instName == "comcam" else "lsst", isEimg=self.useEimg
         )
 
@@ -1165,18 +1184,18 @@ tasks:
         instName : str
             Instrument name.
         """
-        outputImgDir = self.phosimCmpt.getOutputImgDir()
+        outputImgDir = self.batoidCmpt.getOutputImgDir()
 
         if instName == "lsst":
-            wfsExpDir = os.path.join(outputImgDir, self.phosimCmpt.getWfsDirName())
+            wfsExpDir = os.path.join(outputImgDir, self.batoidCmpt.getWfsDirName())
             runProgram(f"butler ingest-raws {butlerRootPath} {wfsExpDir}")
         else:
             intraRawExpDir = os.path.join(
-                outputImgDir, self.phosimCmpt.getIntraFocalDirName()
+                outputImgDir, self.batoidCmpt.getIntraFocalDirName()
             )
 
             extraRawExpDir = os.path.join(
-                outputImgDir, self.phosimCmpt.getExtraFocalDirName()
+                outputImgDir, self.batoidCmpt.getExtraFocalDirName()
             )
             runProgram(f"butler ingest-raws {butlerRootPath} {intraRawExpDir}")
             runProgram(f"butler ingest-raws {butlerRootPath} {extraRawExpDir}")
@@ -1257,7 +1276,7 @@ tasks:
             self.log.info(f"Wrote new sky file to {pathSkyFile}.")
 
         self.configOfcCalc(instName)
-        self.configPhosimCmpt(
+        self.configBatoidCmpt(
             filterType, rotCamInDeg, m1m3ForceError, numPro, boresight=boresight
         )
 
@@ -1273,7 +1292,7 @@ tasks:
 
         if inst == "lsst":
             # Append equal weights for CWFS fields to OFC data
-            self.phosimCmpt.tele.setInstName(camType, defocalDist=0.0)
+            self.batoidCmpt.tele.setInstName(camType, defocalDist=0.0)
             # Assign equal normalized weights to each of the
             # four corner wavefront sensor pairs.
             self.ofcCalc.ofc_data.normalized_image_quality_weight = np.append(
@@ -1281,7 +1300,7 @@ tasks:
                 [0.25, 0.25, 0.25, 0.25],
             )
         else:
-            self.phosimCmpt.tele.setInstName(camType)
+            self.batoidCmpt.tele.setInstName(camType)
 
         # Run the simulation
         self._runSim(

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from .PhosimCmpt import PhosimCmpt
+from .BatoidCmpt import BatoidCmpt
 from .OpdMetrology import OpdMetrology
 from .SkySim import SkySim
 

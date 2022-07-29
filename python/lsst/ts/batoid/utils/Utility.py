@@ -63,7 +63,7 @@ def getModulePath():
         Directory path of module.
     """
 
-    return getPackageDir("ts_phosim")
+    return getPackageDir("ts_batoid")
 
 
 def getConfigDir():
