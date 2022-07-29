@@ -517,8 +517,8 @@ class CloseLoopTask(object):
         """
 
         # Set the telescope state to be the same as the OFC
-        state0 = self.ofcCalc.ofc_controller.aggregated_state
-        self.atoidCmpt.setDofInUm(state0)
+        dofInUm = self.ofcCalc.ofc_controller.aggregated_state
+        self.batoidCmpt.setDofInUm(dofInUm)
 
         # Get the list of referenced sensor name (field positions)
 
@@ -530,6 +530,7 @@ class CloseLoopTask(object):
             cornerSensorLocationList = self.getSensorLocationListOfFields(instName)
             refSensorNameList = []
             refSensorIdList = []
+            refSensorLocationList = []
             for name, id, location in zip(cornerSensorNameList, cornerSensorIdList, cornerSensorLocationList):
                 if name.endswith("SW0"):
                     refSensorNameList.append(name)
@@ -559,11 +560,7 @@ class CloseLoopTask(object):
         for iterCount in range(iterNum):
 
             # Set the observation Id
-            self.batoidCmpt.setSurveyParam(
-                obsId=obsId,
-                zenith_angle = 27.0912,
-                rotation_angle = 0.0
-            )
+            self.batoidCmpt.setSurveyParam(obsId=obsId)
 
             # The iteration directory
             iterDirName = "%s%d" % (iterDefaultDirName, iterCount)
@@ -577,8 +574,9 @@ class CloseLoopTask(object):
             self.batoidCmpt.setOutputImgDir(outputImgDir)
 
             # Generate the OPD image
-
-            self.batoidCmpt.runPhoSim(argString)
+            listOfWfErr = self.batoidCmpt.runBatoid(
+                obsId, refSensorIdList, refSensorLocationList
+            )
 
             # Analyze the OPD data
             # Rotate OPD in the reversed direction of camera
@@ -622,10 +620,16 @@ class CloseLoopTask(object):
                         numPro=numPro,
                         pipelineFile=pipelineFile,
                     )
-            else:
-                # Simulate to get the wavefront sensor data from WEP
-                # listOfWfErr is already generated in runBatoid
-                listOfWfErr = listOfWfErr
+            
+            # Record the wavefront error with the same order as OPD for the
+            # comparison
+            if self.useCcdImg():
+                self.phosimCmpt.reorderAndSaveWfErrFile(
+                    listOfWfErr,
+                    refSensorNameList,
+                    getCamera(instName),
+                    zkFileName=wfsZkFileName,
+                )
 
             # Calculate the DOF
             wfe = np.array(
@@ -635,12 +639,14 @@ class CloseLoopTask(object):
             sensor_names = np.array(
                 [sensor_wfe.getSensorName() for sensor_wfe in listOfWfErr]
             )
+
             field_idx = np.array(
                 [
                     self.ofcCalc.ofc_data.field_idx[sensor_name]
                     for sensor_name in sensor_names
                 ]
             )
+
             if camType == CamType.LsstCam:
                 # For the wavefront sensors the sensor ids
                 # are different than the corresponding field row
@@ -659,8 +665,7 @@ class CloseLoopTask(object):
 
             # Set the new aggregated DOF to BatoidCmpt
             dofInUm = self.ofcCalc.ofc_controller.aggregated_state
-            builder = builder.with_aos_dof(dofInUm)
-            optic = builder.build()
+            self.batoidCmpt.setDofInUm(dofInUm)
 
             # Save the DOF file
             self.batoidCmpt.saveDofInUmFileForNextIter(

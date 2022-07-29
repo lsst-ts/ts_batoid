@@ -796,7 +796,7 @@ class BatoidCmpt(object):
 
         opdFileList = self._getOpdFileInDir(self.outputImgDir)
 
-        wavelengthInUm = self.refWavelength * 1e6
+        wavelengthInUm = self.refWavelength * 1e-3
         pssnList = []
         for opdFile in opdFileList:
             pssn = self.metr.calcPSSN(wavelengthInUm, opdFitsFile=opdFile)
