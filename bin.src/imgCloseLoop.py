@@ -24,7 +24,7 @@
 import argparse
 import logging
 
-from lsst.ts.phosim.CloseLoopTask import CloseLoopTask
+from lsst.ts.batoid.CloseLoopTask import CloseLoopTask
 
 
 if __name__ == "__main__":
