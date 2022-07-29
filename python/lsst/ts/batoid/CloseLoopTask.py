@@ -357,9 +357,18 @@ class CloseLoopTask(object):
 
         # Configure the components
         self.configOfcCalc(instName)
-        self.configBatoidCmpt(filterType, rotCamInDeg, m1m3ForceError, numPro)
+        self.configBatoidCmpt(
+            instName,
+            filterType,
+            rotCamInDeg,
+            m1m3ForceError,
+            numPro,
+            boresight=[0,0],
+            zAngleInDeg=27.0912,
+            seedNum=6,
+        )
 
-        butlerRootPath = os.path.join(baseOutputDir, "phosimData")
+        butlerRootPath = os.path.join(baseOutputDir, "batoidData")
         # Run the simulation
         self._runSim(
             camType=camType,
