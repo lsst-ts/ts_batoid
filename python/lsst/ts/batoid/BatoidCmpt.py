@@ -494,7 +494,7 @@ class BatoidCmpt(object):
             
             opddata = opd.data.astype(np.float32)
             opddata[opd.mask] = 0.0
-            ofn = os.path.join(self.outputDir, f"opd_{obsId}_{sensorId}.fits.gz")
+            ofn = os.path.join(self.outputImgDir, f"opd_{obsId}_{sensorId}.fits.gz")
             fits.writeto(
                 ofn,
                 opddata,
