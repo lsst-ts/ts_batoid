@@ -4,9 +4,9 @@
 #   the "sconsUtils" package.
 setupRequired(sconsUtils)
 setupRequired(utils)
-setupRequired(phosim_utils)
 setupRequired(ts_wep)
 setupRequired(ts_ofc)
+setupRequired(phosim_utils)
 setupRequired(geom)
 setupRequired(afw)
 setupRequired(obs_base)

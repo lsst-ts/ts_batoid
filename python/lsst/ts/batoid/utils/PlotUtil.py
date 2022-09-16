@@ -268,11 +268,14 @@ def plotFwhmOfIters(pssnFiles, saveToFilePath=None, dpi=None):
 
     # Plot the figure
     plt.figure()
-    plt.plot(reshapedFwhmData[:-1, :].T, "bx-")
-    plt.plot(reshapedFwhmData[-1, :], "ro-", label="GQ FWHM_eff")
+    #plt.plot(reshapedFwhmData[:-1, :].T, "bx-")
+    plt.plot(reshapedFwhmData[-1, :], "r-", label="GQ FWHM_eff")
     plt.xlabel("Iteration")
     plt.ylabel("Arcsec")
+    plt.grid()
+    plt.minorticks_on()
     plt.legend()
+    plt.ylim([0, 0.2])
 
     _saveFig(plt, saveToFilePath=saveToFilePath, dpi=dpi)
 

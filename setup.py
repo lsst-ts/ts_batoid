@@ -43,7 +43,7 @@ setuptools.setup(
     name="ts_phosim",
     description="High-Level Module to Perturb the PhoSim.",
     use_scm_version={
-        "write_to": "python/lsst/ts/phosim/version.py",
+        "write_to": "python/lsst/ts/batoid/version.py",
         "write_to_template": scm_version_template,
     },
     setup_requires=["setuptools_scm", "pytest-runner"],
@@ -58,6 +58,6 @@ setuptools.setup(
     license="GPL",
     project_urls={
         "Bug Tracker": "https://jira.lsstcorp.org/secure/Dashboard.jspa",
-        "Source Code": "https://github.com/lsst-ts/ts_phosim",
+        "Source Code": "https://github.com/lsst-ts/ts_batoid",
     },
 )

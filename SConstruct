@@ -1,4 +1,4 @@
 # -*- python -*-
 from lsst.sconsUtils import scripts
 # Python-only package
-scripts.BasicSConstruct("ts_phosim", disableCc=True)
+scripts.BasicSConstruct("ts_batoid", disableCc=True)
