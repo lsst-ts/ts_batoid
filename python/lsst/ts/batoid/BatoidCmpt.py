@@ -79,7 +79,7 @@ class BatoidCmpt(object):
         # M1M3 force error
         self.m1m3ForceError = 0.05
 
-        self.refWavelength = self._teleSettingFile.getSetting("wavelengthInNm")
+        self.refWavelength = self._teleSettingFile.getSetting("wavelengthInNm")*1e-9
 
     def setM1M3ForceError(self, m1m3ForceError):
         """Set the M1M3 force error.
@@ -127,17 +127,17 @@ class BatoidCmpt(object):
             builder = (
                 builder
                 .with_m1m3_gravity(np.deg2rad(self.zAngleInDeg))
+                .with_m1m3_lut(
+                    np.deg2rad(self.zAngleInDeg), 
+                    error=self.m1m3ForceError,
+                    seed=23
+                )
                 .with_m1m3_temperature(
                     m1m3_TBulk=self._teleSettingFile.getSetting("m1m3TBulk"),
                     m1m3_TxGrad=self._teleSettingFile.getSetting("m1m3TxGrad"),
                     m1m3_TyGrad=self._teleSettingFile.getSetting("m1m3TyGrad"),
                     m1m3_TzGrad=self._teleSettingFile.getSetting("m1m3TzGrad"),
                     m1m3_TrGrad=self._teleSettingFile.getSetting("m1m3TrGrad")
-                )
-                .with_m1m3_lut(
-                    np.deg2rad(self.zAngleInDeg), 
-                    error=self.m1m3ForceError, 
-                    seed=self.seedNum
                 )
             )
         if addM2:
@@ -163,6 +163,79 @@ class BatoidCmpt(object):
         
         self.builder = builder
         self.optic =  builder.build()
+
+    def setZAngle(self):
+        """Set the zenith angle.
+
+        """
+
+        builder = (
+                self.builder
+                .with_m1m3_gravity(np.deg2rad(self.zAngleInDeg))
+                .with_m2_gravity(np.deg2rad(self.zAngleInDeg))
+                .with_camera_gravity(
+                    zenith_angle=np.deg2rad(self.zAngleInDeg),
+                    rotation_angle=np.deg2rad(self.rotAngInDeg)
+                )
+            )
+        '''                .with_camera_gravity(
+                zenith_angle=np.deg2rad(self.zAngleInDeg),
+                rotation_angle=np.deg2rad(self.rotAngInDeg)
+            )'''
+
+        self.optic = builder.build()
+
+    def applyTemperature(self, 
+            m1m3_TBulk=None,
+            m1m3_TxGrad=None,
+            m1m3_TyGrad=None,
+            m1m3_TzGrad=None,
+            m1m3_TrGrad=None,
+            m2_TrGrad=None,
+            m2_TzGrad=None,
+            camera_TBulk=None
+        ):
+        """Apply temperature.
+
+        """
+
+        builder = (
+                self.builder
+                .with_m1m3_temperature(
+                    m1m3_TBulk=m1m3_TBulk or self._teleSettingFile.getSetting("m1m3TBulk"),
+                    m1m3_TxGrad=m1m3_TxGrad or self._teleSettingFile.getSetting("m1m3TxGrad"),
+                    m1m3_TyGrad=m1m3_TyGrad or self._teleSettingFile.getSetting("m1m3TyGrad"),
+                    m1m3_TzGrad=m1m3_TzGrad or self._teleSettingFile.getSetting("m1m3TzGrad"),
+                    m1m3_TrGrad=m1m3_TrGrad or self._teleSettingFile.getSetting("m1m3TrGrad"),
+                )
+                .with_m2_temperature(
+                    m2_TrGrad=m2_TrGrad or self._teleSettingFile.getSetting("m2TrGrad"),
+                    m2_TzGrad=m2_TzGrad or self._teleSettingFile.getSetting("m2TzGrad")
+                )   
+                .with_camera_temperature(
+                    camera_TBulk=camera_TBulk or self._teleSettingFile.getSetting("camTB")
+                )
+            )
+
+        self.optic = builder.build()
+
+    def applyLUT(self):
+        """Aply LUT.
+
+        """
+        builder = (
+                self.builder
+                .with_m1m3_lut(
+                    np.deg2rad(self.zAngleInDeg), 
+                    error=0,
+                    seed=23
+                )
+                .with_m2_lut(
+                    np.deg2rad(self.zAngleInDeg), 
+                )
+            )
+
+        self.optic = builder.build()
 
     def getTeleSettingFile(self):
         """Get the setting file.
@@ -796,7 +869,7 @@ class BatoidCmpt(object):
 
         opdFileList = self._getOpdFileInDir(self.outputImgDir)
 
-        wavelengthInUm = self.refWavelength * 1e-3
+        wavelengthInUm = self.refWavelength * 1e6
         pssnList = []
         for opdFile in opdFileList:
             pssn = self.metr.calcPSSN(wavelengthInUm, opdFitsFile=opdFile)

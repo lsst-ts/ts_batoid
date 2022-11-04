@@ -488,6 +488,123 @@ class CloseLoopTask(object):
             elif os.path.isdir(filePath):
                 shutil.rmtree(filePath)
 
+
+    def initializeRealLoop(self, args):
+        boresight = [0, 0]
+        self.rotCamInDeg = args.rotCam
+        rotAngInDeg = 0.0
+        self.useEimg = args.eimage
+        self.m1m3ForceError = args.m1m3FErr
+        self.zAngleInDeg = args.zAngleInDeg
+        self.numPro = args.numOfProc
+        self.iterNum = args.iterNum
+        self.doErsDirCont = args.clobber
+        self.pathSkyFile = args.skyFile
+
+        # Check the input arguments
+        camType, self.instName = self.getCamTypeAndInstName(args.inst)
+        filterType = self.getFilterType(args.filterType)
+        self.baseOutputDir = self.checkAndCreateBaseOutputDir(args.output)
+
+        # Config feedback control loop
+        self.configOfcCalc(self.instName)
+
+        # Config Batoid
+        self.configBatoidCmpt(
+            self.instName,
+            filterType,
+            rotAngInDeg,
+            self.m1m3ForceError,
+            self.numPro,
+            boresight=boresight,
+            zAngleInDeg=self.zAngleInDeg,
+            seedNum=6,
+        )
+        self.batoidCmpt.zAngleInDeg = self.zAngleInDeg
+
+        # Set the telescope state to be the same as the OFC
+        dofInUm = self.ofcCalc.ofc_controller.aggregated_state
+        self.batoidCmpt.setDofInUm(dofInUm)
+
+        # Get the list of referenced sensor name (field positions)
+
+        # If using wavefront sensors we measure one per pair
+        # and the field
+        if camType == CamType.LsstCam:
+            cornerSensorNameList = self.getSensorNameListOfFields(self.instName)
+            cornerSensorIdList = self.getSensorIdListOfFields(self.instName)
+            self.refSensorNameList = []
+            self.refSensorIdList = []
+            for name, id in zip(cornerSensorNameList, cornerSensorIdList):
+                if name.endswith("SW0"):
+                    self.refSensorNameList.append(name)
+                    self.refSensorIdList.append(id)
+        else:
+            self.refSensorNameList = self.getSensorNameListOfFields(self.instName)
+            self.refSensorLocationList = self.getSensorLocationListOfFields(self.instName)
+            self.refSensorIdList = self.getSensorIdListOfFields(self.instName)
+
+
+        # Common file and directory names
+        self.opdZkFileName = "opd.zer"
+        self.opdPssnFileName = "PSSN.txt"
+        self.outputDirName = "pert"
+        self.outputImgDirName = "img"
+        self.iterDefaultDirName = "iter"
+        self.dofInUmFileName = "dofPertInNextIter.mat"
+        self.whmItersFileName = "fwhmIters.png"
+        if args.pipelineFile == "":
+            self.pipelineFile = None
+
+        # Specific file names to the amplifier/eimage
+        self.wfsZkFileName = "wfs.zer"
+
+    def fwhm_compute(self, iterCount,   obsId, zAngleInDeg, rotAngInDeg): 
+
+
+        # The iteration directory
+        iterDirName = "%s%d" % (self.iterDefaultDirName, iterCount)
+
+        outputDir = os.path.join(self.baseOutputDir, iterDirName, self.outputDirName)
+        self.batoidCmpt.setOutputDir(outputDir)
+
+        outputDir = os.path.join(self.baseOutputDir, iterDirName, self.outputImgDirName)
+        self.batoidCmpt.setOutputImgDir(outputDir)
+
+        listOfWfErr = self.batoidCmpt.runBatoid(
+            self.batoidCmpt.obsId, self.refSensorIdList, self.refSensorLocationList
+        )
+
+        self.batoidCmpt.analyzeOpdData(
+            self.instName,
+            zkFileName=self.opdZkFileName,
+            rotOpdInDeg=-self.rotCamInDeg,
+            pssnFileName=self.opdPssnFileName,
+        )
+
+        # Get the PSSN from file
+        pssn = self.batoidCmpt.getOpdPssnFromFile(self.opdPssnFileName)
+
+        # Get the GQ effective FWHM from file
+        gqEffFwhm = self.batoidCmpt.getOpdGqEffFwhmFromFile(self.opdPssnFileName)
+
+        # Set the FWHM data
+        fwhm, sensor_id = self.batoidCmpt.getListOfFwhmSensorData(
+            self.opdPssnFileName, self.refSensorIdList
+        )
+
+        self.ofcCalc.set_fwhm_data(fwhm, sensor_id)
+
+        # Calculate the DOF
+        wfe = np.array(
+            [sensor_wfe.getAnnularZernikePoly() for sensor_wfe in listOfWfErr]
+        )
+        sensor_ids = np.array(
+            [sensor_wfe.getSensorId() for sensor_wfe in listOfWfErr]
+        )
+
+        return gqEffFwhm, wfe, sensor_ids
+        
     def _runSim(
         self,
         camType,

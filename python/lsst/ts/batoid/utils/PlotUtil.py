@@ -279,6 +279,52 @@ def plotFwhmOfIters(pssnFiles, saveToFilePath=None, dpi=None):
 
     _saveFig(plt, saveToFilePath=saveToFilePath, dpi=dpi)
 
+def returnFwhmOfIters(output, ranges, saveToFilePath=None, dpi=None):
+    import os
+    """Plot the FWHM of iteration.
+
+    FWHM: Full width at half maximum.
+    PSSN: Normalized point source sensitivity.
+
+    Parameters
+    ----------
+    pssnFiles : list
+        List of PSSN files.
+    saveToFilePath : str, optional
+        File path to save the figure. If None, the figure will be showed. (the
+        default is None.)
+    dpi : int, optional
+        The resolution in dots per inch. (the default is None.)
+    """
+    pssnFiles = [
+        os.path.join(
+            output,
+            "%s%d" % ('iter', num),
+            'img',
+            'PSSN.txt',
+        )
+        for num in range(ranges)
+    ]
+
+    # Collect the FWHM data. The row is the FWHM for each field. The final row
+    # is the GQ FWHM. The column is the iterations.
+    numOfIter = len(pssnFiles)
+
+    numOfFwhmData = 0
+    fwhmDataAll = np.array([])
+    for pssnFile in pssnFiles:
+
+        fwhmData = np.loadtxt(pssnFile)[1, :]
+        if numOfFwhmData == 0:
+            numOfFwhmData = len(fwhmData)
+
+        fwhmDataAll = np.append(fwhmDataAll, fwhmData)
+
+    reshapedFwhmData = fwhmDataAll.reshape((numOfIter, numOfFwhmData)).T
+
+    # Plot the figure
+    return reshapedFwhmData
+
 
 if __name__ == "__main__":
     pass
