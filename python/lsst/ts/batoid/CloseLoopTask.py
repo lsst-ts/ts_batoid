@@ -24,6 +24,7 @@
 import os
 import shutil
 import logging
+import galsim
 
 import astropy.io.ascii
 
@@ -559,8 +560,54 @@ class CloseLoopTask(object):
         # Specific file names to the amplifier/eimage
         self.wfsZkFileName = "wfs.zer"
 
-    def fwhm_compute(self, iterCount,   obsId, zAngleInDeg, rotAngInDeg): 
 
+    def applyFeedbackLoop(self,         
+        wfe,
+        field_idx,
+        filter_name,
+        gain=-1,
+        rot=0.0
+    ):
+        self.ofcCalc.calculate_corrections(
+                wfe=wfe,
+                field_idx=field_idx,
+                filter_name=filter_name,
+                gain=gain,
+                rot=rot,
+            )
+
+        dofInUm = self.ofcCalc.ofc_controller.aggregated_state 
+
+        self.batoidCmpt.setDofInUm(dofInUm)
+        
+        # Save the DOF file
+        self.batoidCmpt.saveDofInUmFileForNextIter(dofInUm)
+    
+
+    def get_zk(self, opd):
+        xs = np.linspace(-1, 1, opd.shape[0])
+        ys = np.linspace(-1, 1, opd.shape[1])
+        xs, ys = np.meshgrid(xs, ys)
+        w = ~opd.mask
+        basis = galsim.zernike.zernikeBasis(22, xs[w], ys[w], R_inner=0.61)
+        zk, *_ = np.linalg.lstsq(basis.T, opd[w], rcond=None)
+        return zk
+
+    def opds_compute(self):
+
+        opds = self.batoidCmpt.getBatoidOpds(
+            self.batoidCmpt.obsId, self.refSensorIdList, self.refSensorLocationList
+        )
+        for idx in range(len(opds)):
+            xs = np.linspace(-1, 1, opds[idx].shape[0])
+            ys = np.linspace(-1, 1, opds[idx].shape[1])
+            xs, ys = np.meshgrid(xs, ys)
+            zk = self.get_zk(opds[idx])
+            opds[idx] -= galsim.zernike.Zernike(zk[:4], R_inner=0.61)(xs, ys)
+            
+        return opds
+
+    def fwhm_compute(self, iterCount): 
 
         # The iteration directory
         iterDirName = "%s%d" % (self.iterDefaultDirName, iterCount)

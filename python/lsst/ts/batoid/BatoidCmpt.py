@@ -130,7 +130,7 @@ class BatoidCmpt(object):
                 .with_m1m3_lut(
                     np.deg2rad(self.zAngleInDeg), 
                     error=self.m1m3ForceError,
-                    seed=23
+                    seed=self.seedNum
                 )
                 .with_m1m3_temperature(
                     m1m3_TBulk=self._teleSettingFile.getSetting("m1m3TBulk"),
@@ -140,6 +140,8 @@ class BatoidCmpt(object):
                     m1m3_TrGrad=self._teleSettingFile.getSetting("m1m3TrGrad")
                 )
             )
+            '''
+                            '''
         if addM2:
             builder = (
                 builder
@@ -149,6 +151,8 @@ class BatoidCmpt(object):
                     m2_TzGrad=self._teleSettingFile.getSetting("m2TzGrad")
                 )
             )
+            '''
+                            '''
         if addCam:
             builder = (
                 builder
@@ -178,11 +182,7 @@ class BatoidCmpt(object):
                     rotation_angle=np.deg2rad(self.rotAngInDeg)
                 )
             )
-        '''                .with_camera_gravity(
-                zenith_angle=np.deg2rad(self.zAngleInDeg),
-                rotation_angle=np.deg2rad(self.rotAngInDeg)
-            )'''
-
+        self.builder = builder
         self.optic = builder.build()
 
     def applyTemperature(self, 
@@ -216,7 +216,7 @@ class BatoidCmpt(object):
                     camera_TBulk=camera_TBulk or self._teleSettingFile.getSetting("camTB")
                 )
             )
-
+        self.builder = builder
         self.optic = builder.build()
 
     def applyLUT(self):
@@ -234,7 +234,7 @@ class BatoidCmpt(object):
                     np.deg2rad(self.zAngleInDeg), 
                 )
             )
-
+        self.builder = builder
         self.optic = builder.build()
 
     def getTeleSettingFile(self):
@@ -576,6 +576,34 @@ class BatoidCmpt(object):
 
         return listOfWfErr
 
+    def getBatoidOpds(
+        self, obsId, sensorIdList, sensorLocationList
+    ):
+        """Run the Batoid program.
+
+        Parameters
+        ----------
+        argString : str
+            Arguments for Batoid.
+        """
+
+        listOfOpds = []
+        numOfZk = self.getNumOfZk()
+
+        for sensorId, sensorLocation in zip(sensorIdList, sensorLocationList):
+
+            opd = batoid.wavefront(
+                self.optic,
+                sensorLocation[0], sensorLocation[1],
+                wavelength=self.refWavelength, 
+                nx=255
+            ).array * self.refWavelength * 1e6
+            
+            opddata = opd.data.astype(np.float32)
+            opddata[opd.mask] = 0.0
+            listOfOpds.append(opd)
+
+        return listOfOpds
 
     def _writePertAndCmdFiles(self, cmdSettingFileName, cmdFileName):
         """Write the physical perturbation and command files.
